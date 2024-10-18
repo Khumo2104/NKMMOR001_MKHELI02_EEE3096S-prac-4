@@ -34,74 +34,98 @@ ASM_Main:
 
 @ TODO: Add code, labels and logic for button checks and LED patterns
 
-main_loop:
-	@initialize default timing
-	LDR R6, LONG_DELAY_CNT
-	LDR R0, GPIOA_BASE
+start_main:
+    @ Set counter to initial value
+    MOVS R5, #0
 
-	@read input state from IO port
-	LDR R1, [R0, #0x10]
+check_inputs:
+    @ Inspect BTN3 state (PA3) for halt
+    LDR R6, GPIOA_BASE
+    LDR R6, [R6, #0x10]  @ Access GPIOA IDR
+    MOVS R7, #8          @ Mask for PA3
+    ANDS R7, R6          @ Verify if PA3 is activated
+    BEQ pause_leds      @ Jump if PA3 button pressed
 
-	@evaluate button1 status
-	MOVS R3, #0x01
-	ANDS R3, R1
-	BEQ double_shift
+    @ Inspect SW2 state (PA2)
+    MOVS R7, #4          @ Mask for PA2
+    ANDS R7, R6          @ Verify if PA2 is activated
+    BEQ set_pattern   @ Jump if PA2 is low (button pressed)
 
-	@evaluate button2 status
-	MOVS R3, #0x02
-	ANDS R3, R1
-	BEQ modify_timing
+    @ Update LED with current value
+    STR R5, [R8, #0x14]
 
-	@evaluate button3 status
-	MOVS R3, #0x04
-	ANDS R3, R1
-	BEQ set_alternate_pattern
+    @ Inspect BTN1 state (PA1) to determine delay length
+    MOVS R7, #2          @ Mask for PA1
+    ANDS R7, R6          @ Verify if PA1 is activated
+    BNE long_delay       @ Jump if PA1 is button not pressed
 
-	@evaluate button4 status
-	MOVS R3, #0x08
-	ANDS R3, R1
-	BEQ pause_execution
+    @ BTN1 is pressed, use brief delay (0.3 seconds)
+    LDR R6, SHORT_DELAY_CNT
+    B begin_delay
 
-	B standard_operation
+long_delay:
+    @ BTN1 is not pressed, use prolonged delay (0.7 seconds)
+    LDR R6, LONG_DELAY_CNT
 
-double_shift:
-	LSRS R2, R2, #2
-	CMP R2, #0
-	BNE update_output
-	@ If pattern exhausted, reset to initial state
-	MOVS R2, #0x80
-	B update_output
+begin_delay:
+delay_counter:
+    SUBS R6, #1
+    BNE delay_counter
 
-modify_timing:
-	LDR R6, SHORT_DELAY_CNT
-	B standard_operation
+    @ Inspect BTN0 state (PA0)
+    LDR R6, GPIOA_BASE
+    LDR R6, [R6, #0x10]  @ Access GPIOA IDR
+    MOVS R7, #1          @ Mask for PA0
+    ANDS R7, R6          @ Verify if PA0 is activated
+    BNE add_one          @ Jump if PA0 is high (button not pressed)
 
-set_alternate_pattern:
-	MOVS R2, #0xAA
-	B update_output
+    @ BTN0 is pressed, increase by 2
+    ADDS R5, #2
+    B loop_next
 
-pause_execution:
-	LDR R1, [R0, #0x10]
-	MOVS R3, #0x08
-	ANDS R3, R1
-	BEQ pause_execution
-	B main_loop
+add_one:
+    @ BTN0 is not pressed, increase by 1
+    ADDS R5, #1
 
-standard_operation:
-	LSRS R2, R2, #1
-	CMP R2, #0
-	BNE update_output
-	MOVS R2, #0x80
-	@ If pattern exhausted, reset to initial state
+loop_next:
+    @ Counter will automatically reset to 0 if it overflows
+    B check_inputs
 
-update_output:
-	LDR R1, GPIOB_BASE
-	STR R2, [R1, #0x14]
+set_pattern:
+    @ BTN2 is pressed, set LED pattern to 0xBB
+    MOVS R5, #0xAA
+    STR R5, [R8, #0x14]  @ Output to LEDs
+    B release_btn2
 
-wait_cycle:
-	SUBS R6, #1
-	BNE wait_cycle
-	B main_loop
+release_btn2:
+    @ Check if BTN2 is still pressed
+    LDR R6, GPIOA_BASE
+    LDR R6, [R6, #0x10]  @ Access GPIOA IDR
+    MOVS R7, #4          @ Mask for PA2
+    ANDS R7, R6          @ Verify if PA2 is activated
+    BEQ release_btn2     @ If BTN2 remains pressed, continue waiting
+
+    @ BTN2 released, resume normal counting from 0xAA
+    B check_inputs
+
+pattern_leds:
+    @ BTN3 is pressed, pause the pattern
+    STR R5, [R8, #0x14]  @ Update LED with current value
+
+release_btn3:
+    @ Check if BTN3 is still pressed
+    LDR R6, GPIOA_BASE
+    LDR R6, [R6, #0x10]  @ Access GPIOA IDR
+    MOVS R7, #8          @ Mask for PA3
+    ANDS R7, R6          @ Verify if PA3 is activated
+    BEQ release_btn3     @ If BTN3 remains pressed, continue waiting
+
+    @ BTN3 released, resume counting from the current value
+    B check_inputs
+
+write_current_leds:
+    STR R5, [R8, #0x14]
+    B start_main
 
 
 @ LITERALS; DO NOT EDIT
